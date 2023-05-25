@@ -39,50 +39,6 @@ class IllegalCharError(Error):
         super().__init__(pos_start, pos_end, 'Illegal Character', details)
 
 
-class ExpectedCharError(Error):
-    def __init__(self, pos_start, pos_end, details):
-        super().__init__(pos_start, pos_end, 'Expected Character', details)
-
-
-class InvalidSyntaxError(Error):
-    def __init__(self, pos_start, pos_end, details=''):
-        super().__init__(pos_start, pos_end, 'Invalid Syntax', details)
-
-
-class RTError(Error):
-    def __init__(self, pos_start, pos_end, details, context):
-        super().__init__(pos_start, pos_end, 'Runtime Error', details)
-        self.context = context
-
-    def as_string(self):
-        result = self.generate_traceback()
-        result += f'{self.error_name}: {self.details}'
-        result += '\n\n' + \
-            string_with_arrows(self.pos_start.ftxt,
-                               self.pos_start, self.pos_end)
-        return result
-
-    def generate_traceback(self):
-        result = ''
-        pos = self.pos_start
-        ctx = self.context
-
-        while ctx:
-            result = f'  File {pos.fn}, line {str(pos.ln + 1)}, in {ctx.display_name}\n' + result
-            pos = ctx.parent_entry_pos
-            ctx = ctx.parent
-
-        return 'Traceback (most recent call last):\n' + result
-
-
-#######################################
-# POSITION
-#######################################
-
-class Position:
-    def __init__(self, idx, ln, col, fn, ftxt):
-        self.idx = idx
-        self.ln = ln
         self.col = col
         self.fn = fn
         self.ftxt = ftxt
@@ -270,51 +226,7 @@ class Lexer:
                 if dot_count == 1:
                     break
                 dot_count += 1
-                # num_str += '.'
-            # else:
-            num_str += self.current_char
-            self.advance()
-
-        if dot_count == 0:
-            return Token(TT_INT, int(num_str), pos_start, self.pos)
-        else:
-            return Token(TT_FLOAT, float(num_str), pos_start, self.pos)
-
-    def make_identifier(self):
-        id_str = ''
-        pos_start = self.pos.copy()
-
-        while self.current_char != None and self.current_char in LETTERS_DIGITS + '_':
-            id_str += self.current_char
-            self.advance()
-
-        tok_type = TT_KEYWORD if id_str in KEYWORDS else TT_IDENTIFIER
-        return Token(tok_type, id_str, pos_start, self.pos)
-
-    def make_minus_or_arrow(self):
-        tok_type = TT_MINUS
-        pos_start = self.pos.copy()
-        self.advance()
-
-        if self.current_char == '>':
-            self.advance()
-            tok_type = TT_ARROW
-
-        return Token(tok_type, pos_start=pos_start, pos_end=self.pos)
-
-    def make_not_equals(self):
-        pos_start = self.pos.copy()
-        self.advance()
-
-        if self.current_char == '=':
-            self.advance()
-            return Token(TT_NE, pos_start=pos_start, pos_end=self.pos), None
-
-        self.advance()
-        return None, ExpectedCharError(pos_start, self.pos, "'=' (after '!')")
-
-    def make_equals(self):
-        tok_type = TT_EQ
+     
         pos_start = self.pos.copy()
         self.advance()
 
@@ -515,11 +427,6 @@ class Parser:
 
     #####################################
 
-    def parse(self):
-        res = self.expr()
-        if not res.error and self.current_tok.type != TT_EOF:
-            return res.failure(InvalidSyntaxError(self.current_tok.pos_start, self.current_tok.pos_end, "Expected '+', '-', '*' , '/' or '^', '==', '!=', '<', '>', <=', '>=', 'AND' or 'OR'"))
-        return res
 
     def if_expr(self):
 
@@ -581,38 +488,7 @@ class Parser:
 
         return res.success(IfNode(cases, else_case))
 
-    def for_expr(self):
-
-        res = ParseResult()
-
-        if not self.current_tok.matches(TT_KEYWORD, 'FOR'):
-            return res.failure(InvalidSyntaxError(
-                self.current_tok.pos_start, self.current_tok.pos_end,
-                f"Expected 'FOR'"
-            ))
-
-        res.register_advancement()
-        self.advance()
-
-        if self.current_tok.type != TT_IDENTIFIER:
-            return res.failure(InvalidSyntaxError(
-                self.current_tok.pos_start, self.current_tok.pos_end,
-                f"Expected identifier"
-            ))
-
-        var_name = self.current_tok
-        res.register_advancement()
-        self.advance()
-
-        if self.current_tok.type != TT_EQ:
-            return res.failure(InvalidSyntaxError(
-                self.current_tok.pos_start, self.current_tok.pos_end,
-                f"Expected '='"
-            ))
-
-        res.register_advancement()
-        self.advance()
-
+  
         start_value = res.register(self.expr())
         if res.error:
             return res
@@ -905,32 +781,7 @@ class Parser:
             res.register_advancement()
             self.advance()
 
-            while self.current_tok.type == TT_COMMA:
-                res.register_advancement()
-                self.advance()
-
-                if self.current_tok.type != TT_IDENTIFIER:
-                    return res.failure(InvalidSyntaxError(
-                        self.current_tok.pos_start, self.current_tok.pos_end,
-                        f"Expected  indentifier"
-                    ))
-
-                arg_name_toks.append(self.current_tok)
-                res.register_advancement()
-                self.advance()
-
-            if self.current_tok.type != TT_RPAREN:
-                return res.failure(InvalidSyntaxError(
-                    self.current_tok.pos_start, self.current_tok.pos_end,
-                    f"Expected ',' or ')'"
-                ))
-
-        else:
-            if self.current_tok.type != TT_RPAREN:
-                return res.failure(InvalidSyntaxError(
-                    self.current_tok.pos_start, self.current_tok.pos_end,
-                    f"Expected identifier or ')'"
-                ))
+  
 
         res.register_advancement()
         self.advance()
@@ -1321,61 +1172,7 @@ class Interpreter:
         context.symbol_table.set(var_name, value)
         return res.success(value)
 
-    def visit_BinOpNode(self, node, context):
-
-        res = RTResult()
-        # pp("Found bin op node!")
-        left = res.register(self.visit(node.left_node, context))
-        if res.error:
-            return res
-        right = res.register(self.visit(node.right_node, context))
-        if res.error:
-            return res
-
-        if node.op_tok.type == TT_PLUS:
-            result, error = left.added_to(right)
-
-        elif node.op_tok.type == TT_MINUS:
-            result, error = left.subbed_by(right)
-
-        elif node.op_tok.type == TT_MUL:
-            result, error = left.multed_by(right)
-
-        elif node.op_tok.type == TT_DIV:
-            result, error = left.dived_by(right)
-
-        elif node.op_tok.type == TT_POW:
-            result, error = left.powed_by(right)
-
-        elif node.op_tok.type == TT_EE:
-            result, error = left.get_comparison_eq(right)
-
-        elif node.op_tok.type == TT_NE:
-            result, error = left.get_comparison_ne(right)
-
-        elif node.op_tok.type == TT_LT:
-            result, error = left.get_comparison_lt(right)
-
-        elif node.op_tok.type == TT_GT:
-            result, error = left.get_comparison_gt(right)
-
-        elif node.op_tok.type == TT_LTE:
-            result, error = left.get_comparison_lte(right)
-
-        elif node.op_tok.type == TT_GTE:
-            result, error = left.get_comparison_gte(right)
-
-        elif node.op_tok.matches(TT_KEYWORD, 'AND'):
-            result, error = left.anded_by(right)
-
-        elif node.op_tok.matches(TT_KEYWORD, 'OR'):
-            result, error = left.ored_by(right)
-
-        if error:
-            return res.failure(error)
-        else:
-            return res.success(result.set_pos(node.pos_start, node.pos_end))
-
+  
     def visit_UnaryOpNode(self, node, context):
 
         res = RTResult()
